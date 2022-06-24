@@ -196,31 +196,39 @@ def to_str(b):
 
 def get_drives():
     drives = []
-    if sys.platform == "win32":
-        r = subprocess.check_output(["wmic", "PATH", "Win32_LogicalDisk", "get", "DeviceID,", "VolumeName,", "FileSystem,", "DriveType"])
-        for line in to_str(r).split('\n'):
-            words = re.split('\s+', line)
-            if len(words) >= 3 and words[1] == "2" and words[2] == "FAT":
-                drives.append(words[0])
-    else:
-        rootpath = "/media"
-        if sys.platform == "darwin":
-            rootpath = "/Volumes"
-        elif sys.platform == "linux":
-            tmp = rootpath + "/" + os.environ["USER"]
-            if os.path.isdir(tmp):
-                rootpath = tmp
-        for d in os.listdir(rootpath):
-            drives.append(os.path.join(rootpath, d))
+    elapsed = 0
+
+    while elapsed < 10 and len(drives) == 0:
+        if sys.platform == "win32":
+            r = subprocess.check_output(["wmic", "PATH", "Win32_LogicalDisk", "get", "DeviceID,", "VolumeName,", "FileSystem,", "DriveType"])
+            for line in to_str(r).split('\n'):
+                words = re.split('\s+', line)
+                if len(words) >= 3 and words[1] == "2" and words[2] == "FAT":
+                    drives.append(words[0])
+        else:
+            rootpath = "/media"
+            if sys.platform == "darwin":
+                rootpath = "/Volumes"
+            elif sys.platform == "linux":
+                tmp = rootpath + "/" + os.environ["USER"]
+                if os.path.isdir(tmp):
+                    rootpath = tmp
+            for d in os.listdir(rootpath):
+                drives.append(os.path.join(rootpath, d))
 
 
-    def has_info(d):
-        try:
-            return os.path.isfile(d + INFO_FILE)
-        except:
-            return False
+        def has_info(d):
+            try:
+                return os.path.isfile(d + INFO_FILE)
+            except:
+                return False
 
-    return list(filter(has_info, drives))
+        drives = list(filter(has_info, drives))
+
+        time.sleep(0.25)
+        elapsed += 0.25
+
+    return drives
 
 
 def board_id(path):
@@ -313,34 +321,34 @@ if __name__ == "__main__":
 #   http://www.wizio.eu/
 #   https://github.com/Wiz-IO/wizio-pico
 
-
 def dev_uploader(target, source, env):
     global appstartaddr
     appstartaddr = int(env.address, 0)
     bin_name = join(env.get("BUILD_DIR"), env.get("PROGNAME"))+'.bin'
     uf2_name = join(env.get("BUILD_DIR"), env.get("PROGNAME"))+'.uf2'
-    drive = env.get("UPLOAD_PORT")
+
     if None != env.GetProjectOption("monitor_port"):
         try: # reset usb stdio
-            usb = serial.Serial( env.GetProjectOption("monitor_port"), 1200)
-            time.sleep(0.1)
-            usb.close()
+            env.TouchSerialPort(env.GetProjectOption("monitor_port"), 1200)
         except:
             pass
-        time.sleep(1.0) # Windows - AutoPlay
-        if 'Windows' not in system(): time.sleep(1.0)
+    else:
+        print ("*** Please set your monitor_port in order to flash uf2.")
+        
     print( "  Converting to UF2 ( 0x%x )" % (appstartaddr) )
     with open( bin_name, mode='rb' ) as f: inpbuf = f.read()
     outbuf = convert_to_uf2(inpbuf)
-    time.sleep(.1)
+    time.sleep(0.1)
     write_file(uf2_name, outbuf) # write uf2 to build folder
     drives = get_drives()
     if len(drives) == 0:
-        #raise RuntimeError("Pico USB drive not found.")
-        print("\033[1;37;41m                               ")
-        print("\033[1;37;41m   Pico USB drive not found.   ")
-        print("\033[1;37;41m                               ")
-        return
+        print(
+            "\033[1;37;41m                               \n"
+            "\033[1;37;41m   Pico USB drive not found.   \n"
+            "\033[1;37;41m                               \n"
+        )
+        env.Exit(1)
+    time.sleep(0.25)
     for d in drives:
         print("Flashing %s (%s)" % (d, board_id(d)))
         write_file(d +'/'+ env.get("PROGNAME")+'.uf2', outbuf) # write ufs to pico
